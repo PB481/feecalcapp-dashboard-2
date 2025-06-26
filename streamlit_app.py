@@ -1,151 +1,78 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import numpy as np
+import inspect
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+st.set_page_config(layout="wide", page_title="Fee Calculator & Forecaster")
+st.title("Fee Calculator & Forecaster")
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+st.markdown("""
+This application helps you model tiered fee structures for client services, calculate expected revenue and margin, and forecast financial performance over time.
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+**How to use:**
+1.  Define your fee tiers, including unit ranges, price per unit, and frequency.
+2.  Specify the total number of units and the cost per unit.
+3.  View the calculated revenue, cost, and margin, along with financial projections and breakeven points.
+""")
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+st.header("1. Define Fee Tiers")
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+# Global setting for unit type
+unit_type_options = ["Funds", "Classes", "Trades", "Investors"]
+selected_unit_type = st.selectbox("What do the tiers represent?", unit_type_options)
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# Frequency options
+frequency_options = {
+    "Per Year": 1,
+    "Per 6 Months": 2,
+    "Per Quarter": 4,
+    "Per Month": 12,
+    "Per 2 Years": 0.5,
+    "Per 3 Years": 1/3,
+    "Per 5 Years": 1/5
+}
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+# Number of tiers input
+num_tiers = st.number_input("Number of Tiers", min_value=1, max_value=10, value=3, step=1)
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+tiers_data = []
+for i in range(num_tiers):
+    st.subheader(f"Tier {i+1}")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        min_units = st.number_input(f"Min {selected_unit_type} (Tier {i+1})", min_value=0, value=0 if i == 0 else tiers_data[i-1]['max_units'] + 1, step=1, key=f"min_{i}")
+    with col2:
+        max_units = st.number_input(f"Max {selected_unit_type} (Tier {i+1})", min_value=min_units, value=100 if i == 0 else min_units + 99, step=1, key=f"max_{i}")
+    with col3:
+        price_per_unit = st.number_input(f"Price per {selected_unit_type} (Tier {i+1})", min_value=0.0, value=100.0 - (i*10), step=0.01, key=f"price_{i}")
+    
+    frequency_selection = st.selectbox(f"Frequency (Tier {i+1})", list(frequency_options.keys()), key=f"freq_{i}")
+    
+    tiers_data.append({
+        "min_units": min_units,
+        "max_units": max_units,
+        "price_per_unit": price_per_unit,
+        "frequency_multiplier": frequency_options[frequency_selection]
+    })
 
-    return gdp_df
+st.header("2. Input for Calculation")
 
-gdp_df = get_gdp_data()
+total_units = st.number_input(f"Total Number of {selected_unit_type} to Service", min_value=0, value=150, step=1)
+cost_per_unit = st.number_input(f"Cost per {selected_unit_type}", min_value=0.0, value=50.0, step=0.01)
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
+st.header("3. Financial Calculations & Projections")
 
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
+# Placeholder for calculations and display
+st.info("Calculations will appear here after defining tiers and inputs.")
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
+# Placeholder for forecasting and graphs
+st.header("4. Forecasting & Visualizations")
+projection_period_years = st.slider("Projection Period (Years)", min_value=1, max_value=10, value=5)
+st.info("Graphs and breakeven analysis will appear here.")
 
-# Add some spacing
-''
-''
+st.markdown("---")
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+# --- Source Code Expander ---
+with st.expander("View Application Source Code"):
+    source_code = inspect.getsource(inspect.currentframe())
+    st.code(source_code, language='python')
