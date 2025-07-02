@@ -1,220 +1,348 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import inspect
-import plotly.express as px # Import plotly.express
-import io # Import io for in-memory file operations
+from io import BytesIO
 
-st.set_page_config(layout="wide", page_title="Fee Calculator & Forecaster")
-st.title("Fee Calculator & Forecaster")
+# --- Configuration ---
+st.set_page_config(layout="wide", page_title="Reporting Service Pricing Model")
 
-st.markdown("""
-This application helps you model tiered fee structures for client services, calculate expected revenue and margin, and forecast financial performance over time.
+# --- Helper Function for HTML Report ---
+def generate_html_report(data_dict, forecast_df):
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <title>Reporting Service Pricing Report</title>
+    <style>
+        body {{ font-family: sans-serif; margin: 20px; }}
+        h1 {{ color: #2C3E50; }}
+        h2 {{ color: #34495E; border-bottom: 2px solid #34495E; padding-bottom: 5px; margin-top: 30px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        th {{ background-color: #f2f2f2; color: #333; }}
+        .metric-card {{
+            background-color: #ECF0F1;
+            border-left: 5px solid #2980B9;
+            padding: 15px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .metric-value {{ font-size: 1.2em; font-weight: bold; color: #2980B9; }}
+        .metric-label {{ font-size: 0.9em; color: #555; }}
+        .highlight-green {{ color: #27AE60; font-weight: bold; }}
+        .highlight-red {{ color: #C0392B; font-weight: bold; }}
+    </style>
+    </head>
+    <body>
+        <h1>Reporting Service Pricing Model Report</h1>
 
-**How to use:**
-1.  Define your fee tiers, including unit ranges, price per unit, and frequency.
-2.  Specify the total number of units and the cost per unit.
-3.  View the calculated revenue, cost, and margin, along with financial projections and breakeven points.
-""")
+        <h2>Input Parameters</h2>
+        <table>
+            <tr><th>Parameter</th><th>Value</th></tr>
+            <tr><td>Annual Vendor Cost</td><td>${data_dict['vendor_cost_usd']:,}</td></tr>
+            <tr><td>Number of Resources</td><td>{int(data_dict['num_resources'])}</td></tr>
+            <tr><td>Cost Per Resource</td><td>${data_dict['cost_per_resource_usd']:,}</td></tr>
+            <tr><td>Number of Funds</td><td>{int(data_dict['num_funds'])}</td></tr>
+            <tr><td>Desired Margin</td><td>{data_dict['margin_percent']:.2f}%</td></tr>
+            <tr><td>USD to EUR Rate</td><td>{data_dict['usd_to_eur_rate']:.4f}</td></tr>
+            <tr><td>USD to GBP Rate</td><td>{data_dict['usd_to_gbp_rate']:.4f}</td></tr>
+        </table>
 
-with st.sidebar:
-    st.header("1. Define Fee Tiers")
+        <h2>Cost Breakdown (USD)</h2>
+        <table>
+            <tr><th>Category</th><th>Annual Cost (USD)</th></tr>
+            <tr><td>Total Annual Cost</td><td>${data_dict['total_annual_cost_usd']:,}</td></tr>
+            <tr><td>Cost Per Fund (Annual)</td><td>${data_dict['cost_per_fund_annual_usd']:,}</td></tr>
+            <tr><td>Cost Per Fund (Quarterly)</td><td>${data_dict['cost_per_fund_quarterly_usd']:,}</td></tr>
+            <tr><td>Cost Per Fund (Monthly)</td><td>${data_dict['cost_per_fund_monthly_usd']:,}</td></tr>
+        </table>
 
-    # Global setting for unit type
-    unit_type_options = ["Funds", "Classes", "Trades", "Investors"]
-    selected_unit_type = st.selectbox("What do the tiers represent?", unit_type_options)
+        <h2>Pricing Model & Revenue</h2>
+        <table>
+            <tr><th>Metric</th><th>USD</th><th>EUR</th><th>GBP</th></tr>
+            <tr><td>Selling Price Per Fund (Annual)</td><td>${data_dict['selling_price_per_fund_annual_usd']:,}</td><td>€{data_dict['selling_price_per_fund_annual_eur']:,}</td><td>£{data_dict['selling_price_per_fund_annual_gbp']:,}</td></tr>
+            <tr><td>Selling Price Per Fund (Quarterly)</td><td>${data_dict['selling_price_per_fund_quarterly_usd']:,}</td><td>€{data_dict['selling_price_per_fund_quarterly_eur']:,}</td><td>£{data_dict['selling_price_per_fund_quarterly_gbp']:,}</td></tr>
+            <tr><td>Selling Price Per Fund (Monthly)</td><td>${data_dict['selling_price_per_fund_monthly_usd']:,}</td><td>€{data_dict['selling_price_per_fund_monthly_eur']:,}</td><td>£{data_dict['selling_price_per_fund_monthly_gbp']:,}</td></tr>
+            <tr><td>Total Potential Annual Revenue</td><td>${data_dict['total_annual_revenue_usd']:,}</td><td>€{data_dict['total_annual_revenue_eur']:,}</td><td>£{data_dict['total_annual_revenue_gbp']:,}</td></tr>
+        </table>
 
-    # Frequency options
-    frequency_options = {
-        "Per Year": 1,
-        "Per 6 Months": 2,
-        "Per Quarter": 4,
-        "Per Month": 12,
-        "Per 2 Years": 0.5,
-        "Per 3 Years": 1/3,
-        "Per 5 Years": 1/5
-    }
+        <h2>Key Performance Indicators (KPIs)</h2>
+        <div class="metric-card">
+            <div class="metric-label">Gross Profit Margin</div>
+            <div class="metric-value">
+                {data_dict['gross_profit_margin_percent']:.2f}%
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Return on Investment (ROI)</div>
+            <div class="metric-value">
+                {data_dict['roi_percent']:.2f}%
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Break-Even Point (Funds)</div>
+            <div class="metric-value">
+                {data_dict['break_even_funds']:.0f} funds
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Revenue Per Fund</div>
+            <div class="metric-value">
+                ${data_dict['revenue_per_fund_usd']:.2f}
+            </div>
+        </div>
 
-    # Number of tiers input
-    num_tiers = st.number_input("Number of Tiers", min_value=1, max_value=10, value=3, step=1)
+        <h2>5-Year Forecast (USD)</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Year</th>
+                    <th>Cost Reduction (%)</th>
+                    <th>Comment</th>
+                    <th>Adjusted Annual Cost ($)</th>
+                    <th>Forecasted Annual Revenue ($)</th>
+                    <th>Forecasted Profit ($)</th>
+                </tr>
+            </thead>
+            <tbody>
+                """ + "".join([
+                    f"""
+                    <tr>
+                        <td>{int(row['Year'])}</td>
+                        <td>{row['Cost Reduction (%)']:.2f}%</td>
+                        <td>{row['Comment']}</td>
+                        <td>${row['Adjusted Annual Cost ($)']:,}</td>
+                        <td>${row['Forecasted Annual Revenue ($)']:,}</td>
+                        <td>${row['Forecasted Profit ($)']:,}</td>
+                    </tr>
+                    """ for index, row in forecast_df.iterrows()
+                ]) + """
+            </tbody>
+        </table>
 
-    tiers_data = []
-    for i in range(num_tiers):
-        st.subheader(f"Tier {i+1}")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            min_units = st.number_input(f"Min {selected_unit_type} (Tier {i+1})", min_value=0, value=0 if i == 0 else tiers_data[i-1]['max_units'] + 1, step=100, key=f"min_{i}")
-        with col2:
-            max_units = st.number_input(f"Max {selected_unit_type} (Tier {i+1})", min_value=min_units, value=100 if i == 0 else min_units + 99, step=100, key=f"max_{i}")
-        with col3:
-            price_per_unit = st.number_input(f"Price per {selected_unit_type} (Tier {i+1})", min_value=0.0, value=100.0 - (i*10), step=0.01, key=f"price_{i}")
-        
-        frequency_selection = st.selectbox(f"Frequency (Tier {i+1})", list(frequency_options.keys()), key=f"freq_{i}")
-        
-        tiers_data.append({
-            "min_units": min_units,
-            "max_units": max_units,
-            "price_per_unit": price_per_unit,
-            "frequency_multiplier": frequency_options[frequency_selection],
-            "frequency_text": frequency_selection # Store text for report
-        })
+    </body>
+    </html>
+    """
+    return html_content
 
-st.header("2. Input for Calculation")
+# --- Streamlit App ---
+st.title("💰 Reporting Service Pricing Model")
+st.markdown("Calculate costs, set pricing, and forecast revenue for your reporting service.")
 
-total_units = st.number_input(f"Total Number of {selected_unit_type} to Service", min_value=0, value=150, step=100)
-cost_per_unit = st.number_input(f"Cost per {selected_unit_type}", min_value=0.0, value=50.0, step=0.01)
+st.sidebar.header("Cost & Unit Inputs")
+vendor_cost_usd = st.sidebar.number_input("Annual Vendor Cost (USD)", min_value=0.0, value=50000.0, step=1000.0)
+num_resources = st.sidebar.number_input("Number of Resources", min_value=0, value=2, step=1)
+cost_per_resource_usd = st.sidebar.number_input("Cost Per Resource (USD)", min_value=0.0, value=75000.0, step=1000.0)
+num_funds = st.sidebar.number_input("Number of Funds", min_value=1, value=100, step=10)
 
-# --- Core Calculation Logic ---
-def calculate_annual_revenue(total_units, tiers_data):
-    annual_revenue = 0
-    
-    # Sort tiers by min_units to ensure correct processing
-    sorted_tiers = sorted(tiers_data, key=lambda x: x['min_units'])
+st.sidebar.header("Pricing & FX Inputs")
+margin_percent = st.sidebar.slider("Desired Profit Margin (%)", min_value=0.0, max_value=200.0, value=30.0, step=0.5)
+usd_to_eur_rate = st.sidebar.number_input("USD to EUR Exchange Rate", min_value=0.5, value=0.92, step=0.01)
+usd_to_gbp_rate = st.sidebar.number_input("USD to GBP Exchange Rate", min_value=0.5, value=0.79, step=0.01)
 
-    for i, tier in enumerate(sorted_tiers):
-        tier_min = tier["min_units"]
-        tier_max = tier["max_units"]
-        price_per_unit = tier["price_per_unit"]
-        frequency_multiplier = tier["frequency_multiplier"]
+# --- Calculations ---
+total_annual_cost_usd = vendor_cost_usd + (num_resources * cost_per_resource_usd)
+st.subheader("📊 Annual Cost Breakdown (USD)")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Total Annual Cost", f"${total_annual_cost_usd:,.2f}")
+with col2:
+    st.metric("Vendor Cost", f"${vendor_cost_usd:,.2f}")
+with col3:
+    st.metric("Resource Cost", f"${num_resources * cost_per_resource_usd:,.2f}")
 
-        # Determine the number of units that fall into this specific tier
-        # Units are capped by total_units and the tier's max_units
-        units_in_this_tier = max(0, min(total_units, tier_max) - tier_min + 1)
+if num_funds > 0:
+    cost_per_fund_annual_usd = total_annual_cost_usd / num_funds
+    cost_per_fund_quarterly_usd = cost_per_fund_annual_usd / 4
+    cost_per_fund_monthly_usd = cost_per_fund_annual_usd / 12
 
-        # If there are previous tiers, subtract units already accounted for
-        if i > 0:
-            prev_tier_max = sorted_tiers[i-1]['max_units']
-            units_already_counted = max(0, min(total_units, prev_tier_max) - tier_min + 1)
-            units_in_this_tier = max(0, units_in_this_tier - units_already_counted)
+    st.subheader("💸 Cost Per Fund (USD)")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Annual", f"${cost_per_fund_annual_usd:,.2f}")
+    with col2:
+        st.metric("Quarterly", f"${cost_per_fund_quarterly_usd:,.2f}")
+    with col3:
+        st.metric("Monthly", f"${cost_per_fund_monthly_usd:,.2f}")
 
-        annual_revenue += (units_in_this_tier * price_per_unit * frequency_multiplier)
+    st.subheader("💲 Pricing Model & Revenue Forecast")
+    selling_price_per_fund_annual_usd = cost_per_fund_annual_usd * (1 + margin_percent / 100)
+    selling_price_per_fund_quarterly_usd = selling_price_per_fund_annual_usd / 4
+    selling_price_per_fund_monthly_usd = selling_price_per_fund_annual_usd / 12
 
-    return annual_revenue
+    total_annual_revenue_usd = selling_price_per_fund_annual_usd * num_funds
 
-annual_revenue = calculate_annual_revenue(total_units, tiers_data)
-total_annual_cost = total_units * cost_per_unit
-annual_margin = annual_revenue - total_annual_cost
+    st.markdown("### Selling Price Per Fund (USD)")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Annual", f"${selling_price_per_fund_annual_usd:,.2f}")
+    with col2:
+        st.metric("Quarterly", f"${selling_price_per_fund_quarterly_usd:,.2f}")
+    with col3:
+        st.metric("Monthly", f"${selling_price_per_fund_monthly_usd:,.2f}")
 
-st.header("3. Financial Calculations & Projections")
+    st.markdown("### Total Potential Annual Revenue (USD)")
+    st.metric("Total Revenue", f"${total_annual_revenue_usd:,.2f}")
 
-col_rev, col_cost, col_margin = st.columns(3)
-with col_rev:
-    st.metric("Expected Annual Revenue", f"${annual_revenue:,.2f}")
-with col_cost:
-    st.metric("Total Annual Cost", f"${total_annual_cost:,.2f}")
-with col_margin:
-    st.metric("Annual Margin", f"${annual_margin:,.2f}")
+    st.subheader("🌍 Currency Conversion")
+    st.markdown("Convert prices and revenue to EUR and GBP.")
 
+    col_usd, col_eur, col_gbp = st.columns(3)
 
-st.header("4. Forecasting & Visualizations")
-projection_period_years = st.slider("Projection Period (Years)", min_value=1, max_value=10, value=5)
+    with col_usd:
+        st.metric("Annual Price Per Fund (USD)", f"${selling_price_per_fund_annual_usd:,.2f}")
+        st.metric("Total Annual Revenue (USD)", f"${total_annual_revenue_usd:,.2f}")
 
-forecast_df = pd.DataFrame()
-if total_units > 0:
-    # --- Forecasting Data ---
+    with col_eur:
+        selling_price_per_fund_annual_eur = selling_price_per_fund_annual_usd * usd_to_eur_rate
+        total_annual_revenue_eur = total_annual_revenue_usd * usd_to_eur_rate
+        st.metric("Annual Price Per Fund (EUR)", f"€{selling_price_per_fund_annual_eur:,.2f}")
+        st.metric("Total Annual Revenue (EUR)", f"€{total_annual_revenue_eur:,.2f}")
+
+    with col_gbp:
+        selling_price_per_fund_annual_gbp = selling_price_per_fund_annual_usd * usd_to_gbp_rate
+        total_annual_revenue_gbp = total_annual_revenue_usd * usd_to_gbp_rate
+        st.metric("Annual Price Per Fund (GBP)", f"£{selling_price_per_fund_annual_gbp:,.2f}")
+        st.metric("Total Annual Revenue (GBP)", f"£{total_annual_revenue_gbp:,.2f}")
+
+    st.subheader("📈 Key Performance Indicators (KPIs)")
+    gross_profit_margin_percent = ((total_annual_revenue_usd - total_annual_cost_usd) / total_annual_revenue_usd) * 100 if total_annual_revenue_usd > 0 else 0
+    roi_percent = gross_profit_margin_percent # Simple ROI as (Profit/Cost)*100, can be refined
+    break_even_funds = total_annual_cost_usd / selling_price_per_fund_annual_usd if selling_price_per_fund_annual_usd > 0 else 0
+    revenue_per_fund_usd = total_annual_revenue_usd / num_funds if num_funds > 0 else 0
+
+    col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+    with col_kpi1:
+        st.metric("Gross Profit Margin", f"{gross_profit_margin_percent:,.2f}%", help="((Total Revenue - Total Cost) / Total Revenue) * 100")
+    with col_kpi2:
+        st.metric("Return on Investment (ROI)", f"{roi_percent:,.2f}%", help="(Profit / Total Cost) * 100")
+    with col_kpi3:
+        st.metric("Break-Even Point (Funds)", f"{break_even_funds:,.0f} funds", help="Number of funds needed to cover total costs")
+    with col_kpi4:
+        st.metric("Revenue Per Fund", f"${revenue_per_fund_usd:,.2f}")
+
+    st.subheader("🗓️ 5-Year Forecast with Cost Reductions")
+    st.write("Model how cost reductions impact your revenue over a 5-year period.")
+
     forecast_data = []
-    for year in range(1, projection_period_years + 1):
+    current_annual_cost = total_annual_cost_usd
+    current_annual_revenue = total_annual_revenue_usd
+
+    for year in range(1, 6):
+        st.markdown(f"**Year {year}**")
+        col_red, col_comm = st.columns([0.3, 0.7])
+        cost_reduction_percent = col_red.number_input(f"Cost Reduction Year {year} (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key=f"red_{year}")
+        reduction_comment = col_comm.text_input(f"Comment for Year {year} Reduction", key=f"com_{year}")
+
+        adjusted_cost_this_year = current_annual_cost * (1 - cost_reduction_percent / 100)
+        # Revenue remains based on the initial margin applied to the *current year's* adjusted cost
+        # This assumes the pricing strategy (margin) stays constant relative to the costs
+        forecasted_revenue_this_year = adjusted_cost_this_year * (1 + margin_percent / 100)
+        forecasted_profit_this_year = forecasted_revenue_this_year - adjusted_cost_this_year
+
         forecast_data.append({
             "Year": year,
-            "Revenue": annual_revenue,
-            "Cost": total_annual_cost,
-            "Margin": annual_margin
+            "Cost Reduction (%)": cost_reduction_percent,
+            "Comment": reduction_comment,
+            "Adjusted Annual Cost ($)": adjusted_cost_this_year,
+            "Forecasted Annual Revenue ($)": forecasted_revenue_this_year,
+            "Forecasted Profit ($)": forecasted_profit_this_year
         })
+        current_annual_cost = adjusted_cost_this_year # Update cost for next year's calculation
+
     forecast_df = pd.DataFrame(forecast_data)
+    st.dataframe(forecast_df.style.format({
+        "Adjusted Annual Cost ($)": "${:,.2f}",
+        "Forecasted Annual Revenue ($)": "${:,.2f}",
+        "Forecasted Profit ($)": "${:,.2f}",
+        "Cost Reduction (%)": "{:.2f}%"
+    }))
 
-    st.subheader("Projected Financials")
-    st.dataframe(forecast_df.set_index("Year").style.format("${:,.2f}"))
+    st.subheader("📄 Report Generation")
+    st.write("Download a detailed report of your pricing model.")
 
-    # --- Breakeven Analysis ---
-    if annual_margin < 0 and annual_revenue > 0: # Only calculate breakeven if currently losing money but have revenue
-        # Find breakeven units (simplified: where revenue equals cost)
-        # This assumes a linear relationship for simplicity in this initial version
-        # More complex breakeven would involve iterating through units and recalculating tiered revenue
-        if cost_per_unit > 0:
-            breakeven_units = annual_revenue / cost_per_unit
-            st.info(f"Breakeven Point: Approximately {breakeven_units:,.0f} {selected_unit_type} to cover costs.")
-        else:
-            st.info("Cost per unit is zero, so breakeven is at 0 units.")
-    elif annual_margin >= 0:
-        st.success("Already profitable at current unit levels!")
-    else:
-        st.warning("Cannot calculate breakeven: Revenue is zero or negative.")
+    report_data = {
+        'vendor_cost_usd': vendor_cost_usd,
+        'num_resources': num_resources,
+        'cost_per_resource_usd': cost_per_resource_usd,
+        'num_funds': num_funds,
+        'margin_percent': margin_percent,
+        'usd_to_eur_rate': usd_to_eur_rate,
+        'usd_to_gbp_rate': usd_to_gbp_rate,
+        'total_annual_cost_usd': total_annual_cost_usd,
+        'cost_per_fund_annual_usd': cost_per_fund_annual_usd,
+        'cost_per_fund_quarterly_usd': cost_per_fund_quarterly_usd,
+        'cost_per_fund_monthly_usd': cost_per_fund_monthly_usd,
+        'selling_price_per_fund_annual_usd': selling_price_per_fund_annual_usd,
+        'selling_price_per_fund_quarterly_usd': selling_price_per_fund_quarterly_usd,
+        'selling_price_per_fund_monthly_usd': selling_price_per_fund_monthly_usd,
+        'total_annual_revenue_usd': total_annual_revenue_usd,
+        'selling_price_per_fund_annual_eur': selling_price_per_fund_annual_eur,
+        'selling_price_per_fund_annual_gbp': selling_price_per_fund_annual_gbp,
+        'total_annual_revenue_eur': total_annual_revenue_eur,
+        'total_annual_revenue_gbp': total_annual_revenue_gbp,
+        'gross_profit_margin_percent': gross_profit_margin_percent,
+        'roi_percent': roi_percent,
+        'break_even_funds': break_even_funds,
+        'revenue_per_fund_usd': revenue_per_fund_usd
+    }
 
-    # --- Visualizations ---
-    st.subheader("Financial Projections Over Time")
+    # Generate HTML report
+    html_report = generate_html_report(report_data, forecast_df)
+    st.download_button(
+        label="Download HTML Report",
+        data=html_report,
+        file_name="pricing_report.html",
+        mime="text/html"
+    )
 
-    fig_revenue = px.line(forecast_df, x="Year", y="Revenue", title="Projected Annual Revenue")
-    st.plotly_chart(fig_revenue, use_container_width=True)
-
-    fig_cost = px.line(forecast_df, x="Year", y="Cost", title="Projected Annual Cost")
-    st.plotly_chart(fig_cost, use_container_width=True)
-
-    fig_margin = px.line(forecast_df, x="Year", y="Margin", title="Projected Annual Margin")
-    st.plotly_chart(fig_margin, use_container_width=True)
-
-else:
-    st.info("Enter a 'Total Number of Units to Service' greater than 0 to see projections.")
-
-
-# --- Report Generation ---
-@st.cache_data # Cache the report generation to avoid re-running unnecessarily
-def generate_excel_report(tiers_data, total_units, cost_per_unit, annual_revenue, total_annual_cost, annual_margin, forecast_df, selected_unit_type, projection_period_years):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Summary Sheet
+    # Generate Excel report
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Main Calculations Sheet
         summary_data = {
             "Metric": [
-                "Unit Type",
-                f"Total Number of {selected_unit_type} Serviced",
-                f"Cost per {selected_unit_type}",
-                "Expected Annual Revenue",
-                "Total Annual Cost",
-                "Annual Margin",
-                "Projection Period (Years)"
+                "Annual Vendor Cost (USD)", "Number of Resources", "Cost Per Resource (USD)",
+                "Number of Funds", "Desired Profit Margin (%)", "USD to EUR Rate", "USD to GBP Rate",
+                "---",
+                "Total Annual Cost (USD)",
+                "Cost Per Fund (Annual USD)", "Cost Per Fund (Quarterly USD)", "Cost Per Fund (Monthly USD)",
+                "---",
+                "Selling Price Per Fund (Annual USD)", "Selling Price Per Fund (Quarterly USD)", "Selling Price Per Fund (Monthly USD)",
+                "Total Potential Annual Revenue (USD)",
+                "---",
+                "Selling Price Per Fund (Annual EUR)", "Total Potential Annual Revenue (EUR)",
+                "Selling Price Per Fund (Annual GBP)", "Total Potential Annual Revenue (GBP)",
+                "---",
+                "Gross Profit Margin (%)", "Return on Investment (ROI) (%)", "Break-Even Point (Funds)", "Revenue Per Fund (USD)"
             ],
             "Value": [
-                selected_unit_type,
-                total_units,
-                cost_per_unit,
-                annual_revenue,
-                total_annual_cost,
-                annual_margin,
-                projection_period_years
+                vendor_cost_usd, num_resources, cost_per_resource_usd,
+                num_funds, margin_percent, usd_to_eur_rate, usd_to_gbp_rate,
+                "---",
+                total_annual_cost_usd,
+                cost_per_fund_annual_usd, cost_per_fund_quarterly_usd, cost_per_fund_monthly_usd,
+                "---",
+                selling_price_per_fund_annual_usd, selling_price_per_fund_quarterly_usd, selling_price_per_fund_monthly_usd,
+                total_annual_revenue_usd,
+                "---",
+                selling_price_per_fund_annual_eur, total_annual_revenue_eur,
+                selling_price_per_fund_annual_gbp, total_annual_revenue_gbp,
+                "---",
+                gross_profit_margin_percent, roi_percent, break_even_funds, revenue_per_fund_usd
             ]
         }
         summary_df = pd.DataFrame(summary_data)
         summary_df.to_excel(writer, sheet_name='Summary', index=False)
 
-        # Tiers Data Sheet
-        tiers_report_df = pd.DataFrame(tiers_data)
-        tiers_report_df = tiers_report_df.rename(columns={
-            "min_units": f"Min {selected_unit_type}",
-            "max_units": f"Max {selected_unit_type}",
-            "price_per_unit": f"Price per {selected_unit_type}",
-            "frequency_text": "Frequency",
-            "frequency_multiplier": "Annual Multiplier"
-        })
-        tiers_report_df.to_excel(writer, sheet_name='Tiers Data', index=False)
+        # 5-Year Forecast Sheet
+        forecast_df.to_excel(writer, sheet_name='5-Year Forecast', index=False)
 
-        # Forecast Sheet
-        if not forecast_df.empty:
-            forecast_df.to_excel(writer, sheet_name='Forecast', index=False)
-
-    output.seek(0)
-    return output
-
-if total_units > 0:
-    excel_report = generate_excel_report(tiers_data, total_units, cost_per_unit, annual_revenue, total_annual_cost, annual_margin, forecast_df, selected_unit_type, projection_period_years)
     st.download_button(
-        label="Download Full Report (Excel)",
-        data=excel_report,
-        file_name="Fee_Calculation_Report.xlsx",
+        label="Download Excel Report",
+        data=output.getvalue(),
+        file_name="pricing_report.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-st.markdown("---")
-
-# --- Source Code Expander ---
-with st.expander("View Application Source Code"):
-    source_code = inspect.getsource(inspect.currentframe())
-    st.code(source_code, language='python')
+else:
+    st.warning("Please enter a number of funds greater than zero to perform calculations.")
